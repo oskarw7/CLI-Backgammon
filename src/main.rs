@@ -1,3 +1,9 @@
+use game::Game;
+
+mod game;
+mod utils;
+
 fn main() {
-    println!("Hello, world!");
+    let game = Game::new();
+    game.run();
 }
