@@ -6,10 +6,7 @@ use crossterm::{
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use rand::Rng;
-use std::{
-    fmt::format,
-    io::{Write, stdout},
-};
+use std::{io::stdout, path::absolute};
 
 const WHITE: char = 'w';
 const BLACK: char = 'b';
@@ -18,12 +15,14 @@ const LINE_NUMBER_2: u16 = 18;
 const LINE_NUMBER_3: u16 = 19;
 const LINE_NUMBER_4: u16 = 20;
 const LINE_NUMBER_5: u16 = 21;
+const LINE_NUMBER_6: u16 = 22;
 
 #[derive(Debug)]
 pub struct Game {
     board: [u8; 24],
     turn: char,
     roll_result: Vec<u8>,
+    moves: Vec<(usize, usize)>,
     is_running: bool,
 }
 
@@ -61,6 +60,7 @@ impl Game {
             ], // white takes 1-15, black takes 16-30
             turn: WHITE, // rust doesn't tolerate uninitialized fields, needed
             roll_result: Vec::new(),
+            moves: Vec::new(),
             is_running: true,
         }
     }
@@ -93,22 +93,54 @@ impl Game {
         }
         if let Some(color) = self.which_color(destination) {
             if color != self.turn {
-                return false;
+                if !(self.board[destination - 1] == 1 || self.board[destination - 1] == 16) {
+                    return false;
+                }
             }
         }
 
+        // right direction
         if self.turn == WHITE {
-            // right direction
             if destination >= source {
                 return false;
             }
         } else {
-            // right direction
             if destination <= source {
                 return false;
             }
         }
         true
+    }
+
+    fn generate_moves(&mut self) {
+        self.moves.clear();
+        for field in 1..=24 {
+            if let Some(color) = self.which_color(field) {
+                if color == self.turn {
+                    let mut dice_1: isize = self.roll_result[0] as isize;
+                    if self.turn == WHITE {
+                        dice_1 *= -1;
+                    }
+
+                    let dest_1 = field as isize + dice_1;
+                    if dest_1 >= 1 && dest_1 <= 24 && self.is_move_valid(field, dest_1 as usize) {
+                        self.moves.push((field, dest_1 as usize));
+                    }
+
+                    if self.roll_result.len() > 1 && self.roll_result[0] != self.roll_result[1] {
+                        let mut dice_2: isize = self.roll_result[1] as isize;
+                        if self.turn == WHITE {
+                            dice_2 *= -1;
+                        }
+                        let dest_2 = field as isize + dice_2;
+                        if dest_2 >= 1 && dest_2 <= 24 && self.is_move_valid(field, dest_2 as usize)
+                        {
+                            self.moves.push((field, dest_2 as usize));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn move_checker(&mut self, source: usize, destination: usize) {
@@ -122,6 +154,14 @@ impl Game {
             self.board[source - 1] = 0;
         }
         self.board[destination - 1] += 1; // TODO: add capture logic
+
+        if let Some(index) = self
+            .roll_result
+            .iter()
+            .position(|&x| x == ((destination as i32 - source as i32).abs()) as u8)
+        {
+            self.roll_result.remove(index);
+        }
     }
 
     fn roll() -> u8 {
@@ -164,6 +204,17 @@ impl Game {
         }
     }
 
+    fn print_moves(&self) {
+        let mut moves_str = self
+            .moves
+            .iter()
+            .map(|(src, dst)| format!("{src}->{dst}"))
+            .collect::<Vec<String>>()
+            .join(", ");
+        moves_str = format!("Moves: {moves_str}");
+        print_message(0, LINE_NUMBER_6, &moves_str);
+    }
+
     fn draw_checker(&self, index: usize) {
         if self.board[index] <= 15 {
             print!("●");
@@ -190,7 +241,7 @@ impl Game {
     }
 
     fn draw_board(&self) {
-        clear_screen();
+        Game::clear_board();
         for i in 0..self.board.len() {
             let mut checker_count = self.board[i];
             if checker_count == 0 {
@@ -213,6 +264,7 @@ impl Game {
     }
 
     fn draw(&self) {
+        clear_screen();
         self.draw_board();
         // TODO: menu, other UI components
     }
@@ -313,15 +365,26 @@ impl Game {
                     match key_event.code {
                         KeyCode::Char('r') => {
                             self.handle_roll();
-                            loop {
+                            while !self.roll_result.is_empty() {
+                                self.draw_board();
+                                self.print_turn();
+                                self.generate_moves();
+                                self.print_moves();
                                 if let Some(source) = self.get_number("source") {
                                     if let Some(destination) = self.get_number("destination") {
                                         if self.is_move_valid(source as usize, destination as usize)
                                         {
-                                            self.move_checker(source as usize, destination as usize);
-                                            break;
+                                            self.move_checker(
+                                                source as usize,
+                                                destination as usize,
+                                            );
                                         } else {
-                                            print_temp_message(0, LINE_NUMBER_4, "Invalid move", 1000);
+                                            print_temp_message(
+                                                0,
+                                                LINE_NUMBER_4,
+                                                "Invalid move",
+                                                1000,
+                                            );
                                         }
                                     }
                                 }
