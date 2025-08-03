@@ -65,11 +65,59 @@ impl Game {
         }
     }
 
+    fn which_color(&self, field: usize) -> Option<char> {
+        if self.board[field - 1] >= 1 && self.board[field - 1] <= 15 {
+            return Some(WHITE);
+        } else if self.board[field - 1] >= 16 && self.board[field - 1] <= 30 {
+            return Some(BLACK);
+        }
+        None
+    }
+
+    fn is_move_valid(&self, source: usize, destination: usize) -> bool {
+        // withing board bounds
+        if source < 1 || source > 24 || destination < 1 || source > 24 {
+            return false;
+        }
+
+        // has checker on source field
+        if self.board[source - 1] == 0 {
+            return false;
+        }
+
+        // right color
+        if let Some(color) = self.which_color(source) {
+            if color != self.turn {
+                return false;
+            }
+        }
+        if let Some(color) = self.which_color(destination) {
+            if color != self.turn {
+                return false;
+            }
+        }
+
+        if self.turn == WHITE {
+            // right direction
+            if destination >= source {
+                return false;
+            }
+        } else {
+            // right direction
+            if destination <= source {
+                return false;
+            }
+        }
+        true
+    }
+
     fn move_checker(&mut self, source: usize, destination: usize) {
+        // black moves to empty fields
         if self.board[source - 1] > 15 && self.board[destination - 1] == 0 {
             self.board[destination - 1] += 15;
         }
         self.board[source - 1] -= 1;
+        // black moves single checker
         if self.board[source - 1] == 15 {
             self.board[source - 1] = 0;
         }
@@ -191,12 +239,7 @@ impl Game {
                                     clear_line(LINE_NUMBER_4);
                                     return Some(num);
                                 } else {
-                                    print_temp_message(
-                                        0,
-                                        LINE_NUMBER_4,
-                                        "Invalid number",
-                                        1000,
-                                    );
+                                    print_temp_message(0, LINE_NUMBER_4, "Invalid number", 1000);
                                 }
                             } else {
                                 print_temp_message(0, LINE_NUMBER_4, "Invalid number", 1000);
@@ -273,19 +316,24 @@ impl Game {
                             loop {
                                 if let Some(source) = self.get_number("source") {
                                     if let Some(destination) = self.get_number("destination") {
-                                        self.move_checker(source as usize, destination as usize);
-                                        break;
+                                        if self.is_move_valid(source as usize, destination as usize)
+                                        {
+                                            self.move_checker(source as usize, destination as usize);
+                                            break;
+                                        } else {
+                                            print_temp_message(0, LINE_NUMBER_4, "Invalid move", 1000);
+                                        }
                                     }
                                 }
                             }
-                        },
+                            self.change_turn();
+                        }
                         KeyCode::Esc => return,
                         KeyCode::Char('q') => self.quit(),
                         _ => {}
                     }
                 }
             }
-            self.change_turn();
         }
     }
 
