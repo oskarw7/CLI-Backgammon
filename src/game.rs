@@ -13,9 +13,11 @@ use std::{
 
 const WHITE: char = 'w';
 const BLACK: char = 'b';
-const MENU_LINE_NUMBDER: u16 = 17;
-const PROMPT_LINE_NUMBER: u16 = 18;
-const INPUT_LINE_NUMBER: u16 = 19;
+const LINE_NUMBER_1: u16 = 17;
+const LINE_NUMBER_2: u16 = 18;
+const LINE_NUMBER_3: u16 = 19;
+const LINE_NUMBER_4: u16 = 20;
+const LINE_NUMBER_5: u16 = 21;
 
 #[derive(Debug)]
 pub struct Game {
@@ -79,6 +81,41 @@ impl Game {
         rng.random_range(1..=6)
     }
 
+    fn handle_roll(&mut self) {
+        self.roll_result.clear();
+
+        let dice_1 = Game::roll();
+        self.roll_result.push(dice_1);
+        let dice_2 = Game::roll();
+        self.roll_result.push(dice_2);
+
+        let mut dice_str = String::new();
+        if dice_1 != dice_2 {
+            dice_str = format!("Result: {dice_1}, {dice_2}");
+        } else {
+            self.roll_result.push(dice_1);
+            self.roll_result.push(dice_1);
+            dice_str = format!("Result: {dice_1}, {dice_1}, {dice_1}, {dice_1}");
+        }
+        print_message(0, LINE_NUMBER_5, &dice_str);
+    }
+
+    fn change_turn(&mut self) {
+        if self.turn == WHITE {
+            self.turn = BLACK;
+        } else {
+            self.turn = WHITE;
+        }
+    }
+
+    fn print_turn(&self) {
+        if self.turn == WHITE {
+            print_message(0, LINE_NUMBER_2, "White's turn");
+        } else {
+            print_message(0, LINE_NUMBER_2, "Black's turn");
+        }
+    }
+
     fn draw_checker(&self, index: usize) {
         if self.board[index] <= 15 {
             print!("●");
@@ -133,36 +170,36 @@ impl Game {
     }
 
     fn get_number(&mut self, mode: &str) -> Option<u8> {
-        print_message(0, MENU_LINE_NUMBDER, "ESC - reset selection");
+        print_message(0, LINE_NUMBER_1, "ESC - reset selection");
         let prompt = format!("Enter {mode} number:");
-        print_message(0, PROMPT_LINE_NUMBER, &prompt);
+        print_message(0, LINE_NUMBER_3, &prompt);
 
         let mut input = String::new();
         while self.is_running {
             if let Ok(event) = read() {
                 if let Event::Key(key_event) = event {
-                    clear_line(INPUT_LINE_NUMBER);
+                    clear_line(LINE_NUMBER_4);
                     match key_event.code {
                         KeyCode::Char(c) if c.is_digit(10) => {
                             input.push(c);
-                            move_cursor(0, INPUT_LINE_NUMBER);
-                            println!("{}", input);
+                            let input_str = input.to_string();
+                            print_message(0, 20, &input_str);
                         }
                         KeyCode::Enter => {
                             if let Ok(num) = input.parse::<u8>() {
                                 if (1..=24).contains(&num) {
-                                    clear_line(INPUT_LINE_NUMBER);
+                                    clear_line(LINE_NUMBER_4);
                                     return Some(num);
                                 } else {
                                     print_temp_message(
                                         0,
-                                        INPUT_LINE_NUMBER,
+                                        LINE_NUMBER_4,
                                         "Invalid number",
                                         1000,
                                     );
                                 }
                             } else {
-                                print_temp_message(0, INPUT_LINE_NUMBER, "Invalid number", 1000);
+                                print_temp_message(0, LINE_NUMBER_4, "Invalid number", 1000);
                             }
                             input.clear();
                         }
@@ -183,11 +220,10 @@ impl Game {
         let mut rolls_count = 0;
         while rolls_count < 2 {
             self.draw();
-            print_message(0, MENU_LINE_NUMBDER, "R)oll, Q)uit");
+            self.print_turn();
+            print_message(0, LINE_NUMBER_1, "R)oll, Q)uit");
             if rolls_count == 0 {
-                print_message(0, PROMPT_LINE_NUMBER, "White rolls:");
-            } else {
-                print_message(0, PROMPT_LINE_NUMBER, "Black rolls:");
+                self.change_turn();
             }
             if let Ok(event) = read() {
                 if let Event::Key(key_event) = event {
@@ -196,13 +232,13 @@ impl Game {
                             rolls_count += 1;
                             let dice = Game::roll();
                             self.roll_result.push(dice);
-                            let str_dice = dice.to_string();
-                            print_temp_message(0, INPUT_LINE_NUMBER, &str_dice, 1000);
+                            let dice_str = format!("Result: {dice}");
+                            print_temp_message(0, LINE_NUMBER_5, &dice_str, 1000);
                         }
                         KeyCode::Char('q') => {
                             self.quit();
                             return;
-                        },
+                        }
                         _ => {}
                     }
                 }
@@ -210,30 +246,30 @@ impl Game {
             if rolls_count == 2 && self.roll_result[0] == self.roll_result[1] {
                 self.roll_result.clear();
                 rolls_count = 0;
-                print_temp_message(0, INPUT_LINE_NUMBER, "Tie", 1000);
+                self.change_turn();
+                print_temp_message(0, LINE_NUMBER_3, "Tie", 1000);
             }
         }
         if self.roll_result[0] > self.roll_result[1] {
             self.turn = WHITE;
-            print_temp_message(0, INPUT_LINE_NUMBER, "White starts", 1000);
+            print_temp_message(0, LINE_NUMBER_3, "White starts", 1000);
         } else {
             self.turn = BLACK;
-            print_temp_message(0, INPUT_LINE_NUMBER, "Black starts", 1000);
+            print_temp_message(0, LINE_NUMBER_3, "Black starts", 1000);
         }
-        self.roll_result.clear();
     }
 
     fn play(&mut self) {
         self.choose_who_starts();
         while self.is_running {
             self.draw();
-            print_message(0, MENU_LINE_NUMBDER, "R)oll, Q)uit, ESC - back to menu");
+            print_message(0, LINE_NUMBER_1, "R)oll, Q)uit, ESC - back to menu");
+            self.print_turn();
             if let Ok(event) = read() {
                 if let Event::Key(key_event) = event {
                     match key_event.code {
                         KeyCode::Char('r') => {
-                            // roll logic
-                            // choosing fields
+                            self.handle_roll();
                             loop {
                                 if let Some(source) = self.get_number("source") {
                                     if let Some(destination) = self.get_number("destination") {
@@ -242,13 +278,14 @@ impl Game {
                                     }
                                 }
                             }
-                        }
+                        },
                         KeyCode::Esc => return,
                         KeyCode::Char('q') => self.quit(),
                         _ => {}
                     }
                 }
             }
+            self.change_turn();
         }
     }
 
@@ -259,7 +296,7 @@ impl Game {
     pub fn run(&mut self) {
         while self.is_running {
             self.draw();
-            print_message(0, MENU_LINE_NUMBDER, "P)lay, Q)uit");
+            print_message(0, LINE_NUMBER_1, "P)lay, Q)uit");
             if let Ok(event) = read() {
                 if let Event::Key(key_event) = event {
                     match key_event.code {
