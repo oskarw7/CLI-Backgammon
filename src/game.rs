@@ -25,6 +25,7 @@ pub struct Game {
     roll_result: Vec<u8>,
     moves: Vec<(usize, usize)>,
     bar: [u8; 2],
+    home: [u8; 2],
     is_running: bool,
 }
 
@@ -64,6 +65,7 @@ impl Game {
             roll_result: Vec::new(),
             moves: Vec::new(),
             bar: [0, 0],
+            home: [0, 0],
             is_running: true,
         }
     }
@@ -75,6 +77,77 @@ impl Game {
             return Some(BLACK);
         }
         None
+    }
+
+    fn are_all_home(&self, color: u8) -> bool {
+        let mut checker_count = 0;
+        if color == WHITE {
+            for field in (1..=6).rev() {
+                if self.which_color(field) == Some(WHITE) {
+                    checker_count += self.board[field - 1];
+                }
+            }
+        } else {
+            for field in 19..=24 {
+                if self.which_color(field) == Some(BLACK) {
+                    checker_count += self.board[field - 1] - 15;
+                }
+            }
+        }
+
+        if checker_count == 15 - self.home[self.turn as usize] {
+            return true;
+        }
+        false
+    }
+
+    fn farthest_to_tray(&self, color: u8) -> Option<usize> {
+        if color == WHITE {
+            for field in (1..=6).rev() {
+                if self.which_color(field) == Some(WHITE) {
+                    return Some(field);
+                }
+            }
+        } else {
+            for field in 19..=24 {
+                if self.which_color(field) == Some(BLACK) {
+                    return Some(field);
+                }
+            }
+        }
+        None
+    }
+
+    fn validate_home(&self, source: usize, destination: usize) -> bool {
+        // 0 and 25 represent tray for white and black, respectively
+        let valid_destination = if self.turn == WHITE { 0 } else { 25 };
+        if destination != valid_destination || source < 1 || source > 24 {
+            return false;
+        }
+
+        // has checker on source field
+        if self.board[source - 1] == 0 {
+            return false;
+        }
+
+        // right color
+        if let Some(color) = self.which_color(source) {
+            if color != self.turn {
+                return false;
+            }
+        }
+
+        // right direction
+        if self.turn == WHITE {
+            if destination >= source {
+                return false;
+            }
+        } else {
+            if destination <= source {
+                return false;
+            }
+        }
+        true
     }
 
     fn validate_bar(&self, source: usize, destination: usize) -> bool {
@@ -148,25 +221,49 @@ impl Game {
         true
     }
 
-    fn add_move(&mut self, source: usize) {
-        let mut dice_1: isize = self.roll_result[0] as isize;
-        if self.turn == WHITE {
-            dice_1 *= -1;
+    fn add_moves_to_tray_dice(&mut self, destination: usize, mut dice: isize) {
+        if let Some(field) = self.farthest_to_tray(self.turn) {
+            if dice > field as isize {
+                dice = field as isize;
+            }
         }
-        let mut dest = source as isize + dice_1;
+        if self.turn == BLACK {
+            dice *= -1;
+        }
+        let src = destination as isize + dice;
+        if src >= 1 && src <= 24 && self.validate_home(src as usize, destination) {
+            self.moves.push((src as usize, destination));
+        }
+    }
+
+    fn add_moves_to_tray(&mut self) {
+        let destination: usize = if self.turn == WHITE { 0 } else { 25 };
+        let mut dice: isize = self.roll_result[0] as isize;
+        self.add_moves_to_tray_dice(destination, dice);
+
+        if self.roll_result.len() > 1 && self.roll_result[0] != self.roll_result[1] {
+            dice = self.roll_result[1] as isize;
+            self.add_moves_to_tray_dice(destination, dice);
+        }
+    }
+
+    fn add_moves_from_dice(&mut self, source: usize, mut dice: isize) {
+        if self.turn == WHITE {
+            dice *= -1;
+        }
+        let dest = source as isize + dice;
         if dest >= 1 && dest <= 24 && self.is_move_valid(source, dest as usize) {
             self.moves.push((source, dest as usize));
         }
+    }
+
+    fn add_moves_from(&mut self, source: usize) {
+        let mut dice: isize = self.roll_result[0] as isize;
+        self.add_moves_from_dice(source, dice);
 
         if self.roll_result.len() > 1 && self.roll_result[0] != self.roll_result[1] {
-            let mut dice_2: isize = self.roll_result[1] as isize;
-            if self.turn == WHITE {
-                dice_2 *= -1;
-            }
-            dest = source as isize + dice_2;
-            if dest >= 1 && dest <= 24 && self.is_move_valid(source, dest as usize) {
-                self.moves.push((source, dest as usize));
-            }
+            dice = self.roll_result[1] as isize;
+            self.add_moves_from_dice(source, dice);
         }
     }
 
@@ -176,7 +273,7 @@ impl Game {
         // moves from bar first
         if self.bar[self.turn as usize] > 0 {
             let source: usize = if self.turn == WHITE { 25 } else { 0 };
-            self.add_move(source);
+            self.add_moves_from(source);
             return;
         }
 
@@ -184,21 +281,48 @@ impl Game {
         for source in 1..=24 {
             if let Some(color) = self.which_color(source) {
                 if color == self.turn {
-                    self.add_move(source);
+                    self.add_moves_from(source);
                 }
             }
+        }
+
+        // moves to tray
+        if self.are_all_home(self.turn) {
+            self.add_moves_to_tray();
         }
     }
 
     fn move_checker(&mut self, source: usize, destination: usize) {
-        // checker gets captured
-        if let Some(color) = self.which_color(destination) {
-            if color != self.turn {
-                self.board[destination - 1] = 0;
-                self.bar[color as usize] += 1;
+        // moves to tray / other moves
+        if self.are_all_home(self.turn) && (destination == 0 || destination == 25) {
+            self.home[self.turn as usize] += 1;
+            // removing the roll if taking of was forced (smaller move than the greatest roll)
+            // TODO: test that
+            if let Some((index, &max)) = self.roll_result
+                .iter()
+                .enumerate()
+                .max_by_key(|&(_, &val)| val) {
+                    if max > (destination as i32 - source as i32) as u8 {
+                        self.roll_result.remove(index);
+                    }
+                }
+        } else {
+            // checker gets captured
+            if let Some(color) = self.which_color(destination) {
+                if color != self.turn {
+                    self.board[destination - 1] = 0;
+                    self.bar[color as usize] += 1;
+                }
             }
+
+            // black moves to empty fields
+            if self.turn == BLACK && self.board[destination - 1] == 0 {
+                self.board[destination - 1] += 15;
+            }
+            self.board[destination - 1] += 1;
         }
 
+        // moves from bar / other moves
         if self.bar[self.turn as usize] != 0 {
             self.bar[self.turn as usize] -= 1;
         } else {
@@ -208,12 +332,6 @@ impl Game {
                 self.board[source - 1] = 0;
             }
         }
-
-        // black moves to empty fields
-        if self.turn == BLACK && self.board[destination - 1] == 0 {
-            self.board[destination - 1] += 15;
-        }
-        self.board[destination - 1] += 1;
 
         // removing the roll
         if let Some(index) = self
@@ -303,8 +421,16 @@ impl Game {
 
     fn draw_board(&self) {
         Game::clear_board();
-        print_message(0, 0,  "13   14   15   16   17   18   19   20   21   22   23   24");
-        print_message(0, 15, "12   11   10   9    8    7    6    5    4    3    2    1");
+        print_message(
+            0,
+            0,
+            "13   14   15   16   17   18   19   20   21   22   23   24",
+        );
+        print_message(
+            0,
+            15,
+            "12   11   10   9    8    7    6    5    4    3    2    1",
+        );
         for i in 0..self.board.len() {
             let mut checker_count = self.board[i] as u16;
             if checker_count == 0 {
@@ -316,20 +442,27 @@ impl Game {
             }
             for j in 0..checker_count {
                 if i < 12 {
-                    move_cursor(((11 - i) * 5) as u16, 15 - (j+BOARD_OFFSET)); // TODO: add checker count threshold
+                    move_cursor(((11 - i) * 5) as u16, 15 - (j + BOARD_OFFSET)); // TODO: add checker count threshold
                 } else {
-                    move_cursor(((i - 12) * 5) as u16, j+BOARD_OFFSET);
+                    move_cursor(((i - 12) * 5) as u16, j + BOARD_OFFSET);
                 }
                 self.draw_checker(i);
             }
         }
         move_cursor(60, 0);
         print!(
-            "Bar: {} x ●, {} x ○",
+            "Bar:  {} x ●, {} x ○",
             self.bar[WHITE as usize], self.bar[BLACK as usize]
         );
         move_cursor(65, 1);
-        print!("25     0");
+        print!(" 25     0");
+        move_cursor(60, 3);
+        print!(
+            "Home: {} x ●, {} x ○",
+            self.home[WHITE as usize], self.home[BLACK as usize]
+        );
+        move_cursor(65, 4);
+        print!(" 0      25");
     }
 
     fn draw(&self) {
@@ -425,7 +558,7 @@ impl Game {
         self.choose_who_starts();
         while self.is_running {
             self.draw();
-            print_message(0, LINE_NUMBER_1, "R)oll, Q)uit, ESC - back to menu");
+            print_message(0, LINE_NUMBER_1, "R)oll, S)ave, Q)uit, ESC - back to menu");
             self.print_turn();
             if let Ok(event) = read() {
                 if let Event::Key(key_event) = event {
