@@ -6,10 +6,10 @@ use crossterm::{
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use rand::Rng;
-use std::{io::stdout, path::absolute};
+use std::io::stdout;
 
-const WHITE: char = 'w';
-const BLACK: char = 'b';
+const WHITE: u8 = 0;
+const BLACK: u8 = 1;
 const LINE_NUMBER_1: u16 = 17;
 const LINE_NUMBER_2: u16 = 18;
 const LINE_NUMBER_3: u16 = 19;
@@ -20,9 +20,10 @@ const LINE_NUMBER_6: u16 = 22;
 #[derive(Debug)]
 pub struct Game {
     board: [u8; 24],
-    turn: char,
+    turn: u8,
     roll_result: Vec<u8>,
     moves: Vec<(usize, usize)>,
+    bar: [u8; 2],
     is_running: bool,
 }
 
@@ -61,11 +62,12 @@ impl Game {
             turn: WHITE, // rust doesn't tolerate uninitialized fields, needed
             roll_result: Vec::new(),
             moves: Vec::new(),
+            bar: [0, 0],
             is_running: true,
         }
     }
 
-    fn which_color(&self, field: usize) -> Option<char> {
+    fn which_color(&self, field: usize) -> Option<u8> {
         if self.board[field - 1] >= 1 && self.board[field - 1] <= 15 {
             return Some(WHITE);
         } else if self.board[field - 1] >= 16 && self.board[field - 1] <= 30 {
@@ -74,9 +76,42 @@ impl Game {
         None
     }
 
+    fn validate_bar(&self, source: usize, destination: usize) -> bool {
+        // 25 and 0 represent bar for white and black, respectively
+        let valid_source = if self.turn == WHITE { 25 } else { 0 };
+        if source != valid_source || destination < 1 || destination > 24 {
+            return false;
+        }
+
+        // right color
+        if let Some(color) = self.which_color(destination) {
+            if color != self.turn {
+                if !(self.board[destination - 1] == 1 || self.board[destination - 1] == 16) {
+                    return false;
+                }
+            }
+        }
+
+        // right direction
+        if self.turn == WHITE {
+            if destination >= source {
+                return false;
+            }
+        } else {
+            if destination <= source {
+                return false;
+            }
+        }
+        true
+    }
+
     fn is_move_valid(&self, source: usize, destination: usize) -> bool {
+        if self.bar[self.turn as usize] > 0 {
+            return self.validate_bar(source, destination);
+        }
+
         // withing board bounds
-        if source < 1 || source > 24 || destination < 1 || source > 24 {
+        if source < 1 || source > 24 || destination < 1 || destination > 24 {
             return false;
         }
 
@@ -112,49 +147,74 @@ impl Game {
         true
     }
 
+    fn add_move(&mut self, source: usize) {
+        let mut dice_1: isize = self.roll_result[0] as isize;
+        if self.turn == WHITE {
+            dice_1 *= -1;
+        }
+        let mut dest = source as isize + dice_1;
+        if dest >= 1 && dest <= 24 && self.is_move_valid(source, dest as usize) {
+            self.moves.push((source, dest as usize));
+        }
+
+        if self.roll_result.len() > 1 && self.roll_result[0] != self.roll_result[1] {
+            let mut dice_2: isize = self.roll_result[1] as isize;
+            if self.turn == WHITE {
+                dice_2 *= -1;
+            }
+            dest = source as isize + dice_2;
+            if dest >= 1 && dest <= 24 && self.is_move_valid(source, dest as usize) {
+                self.moves.push((source, dest as usize));
+            }
+        }
+    }
+
     fn generate_moves(&mut self) {
         self.moves.clear();
-        for field in 1..=24 {
-            if let Some(color) = self.which_color(field) {
+
+        // moves from bar first
+        if self.bar[self.turn as usize] > 0 {
+            let source: usize = if self.turn == WHITE { 25 } else { 0 };
+            self.add_move(source);
+            return;
+        }
+
+        // typical moves
+        for source in 1..=24 {
+            if let Some(color) = self.which_color(source) {
                 if color == self.turn {
-                    let mut dice_1: isize = self.roll_result[0] as isize;
-                    if self.turn == WHITE {
-                        dice_1 *= -1;
-                    }
-
-                    let dest_1 = field as isize + dice_1;
-                    if dest_1 >= 1 && dest_1 <= 24 && self.is_move_valid(field, dest_1 as usize) {
-                        self.moves.push((field, dest_1 as usize));
-                    }
-
-                    if self.roll_result.len() > 1 && self.roll_result[0] != self.roll_result[1] {
-                        let mut dice_2: isize = self.roll_result[1] as isize;
-                        if self.turn == WHITE {
-                            dice_2 *= -1;
-                        }
-                        let dest_2 = field as isize + dice_2;
-                        if dest_2 >= 1 && dest_2 <= 24 && self.is_move_valid(field, dest_2 as usize)
-                        {
-                            self.moves.push((field, dest_2 as usize));
-                        }
-                    }
+                    self.add_move(source);
                 }
             }
         }
     }
 
     fn move_checker(&mut self, source: usize, destination: usize) {
+        // checker gets captured
+        if let Some(color) = self.which_color(destination) {
+            if color != self.turn {
+                self.board[destination - 1] = 0;
+                self.bar[color as usize] += 1;
+            }
+        }
+
+        if self.bar[self.turn as usize] != 0 {
+            self.bar[self.turn as usize] -= 1;
+        } else {
+            self.board[source - 1] -= 1;
+            // black moves single checker
+            if self.board[source - 1] == 15 {
+                self.board[source - 1] = 0;
+            }
+        }
+
         // black moves to empty fields
-        if self.board[source - 1] > 15 && self.board[destination - 1] == 0 {
+        if self.turn == BLACK && self.board[destination - 1] == 0 {
             self.board[destination - 1] += 15;
         }
-        self.board[source - 1] -= 1;
-        // black moves single checker
-        if self.board[source - 1] == 15 {
-            self.board[source - 1] = 0;
-        }
-        self.board[destination - 1] += 1; // TODO: add capture logic
+        self.board[destination - 1] += 1;
 
+        // removing the roll
         if let Some(index) = self
             .roll_result
             .iter()
@@ -260,7 +320,11 @@ impl Game {
                 self.draw_checker(i);
             }
         }
-        move_cursor(0, 0);
+        move_cursor(60, 0);
+        print!(
+            "Bar: {} x ●, {} x ○",
+            self.bar[WHITE as usize], self.bar[BLACK as usize]
+        );
     }
 
     fn draw(&self) {
@@ -287,7 +351,8 @@ impl Game {
                         }
                         KeyCode::Enter => {
                             if let Ok(num) = input.parse::<u8>() {
-                                if (1..=24).contains(&num) {
+                                if (0..=25).contains(&num) {
+                                    // temporary for moving from bar
                                     clear_line(LINE_NUMBER_4);
                                     return Some(num);
                                 } else {
@@ -317,9 +382,6 @@ impl Game {
             self.draw();
             self.print_turn();
             print_message(0, LINE_NUMBER_1, "R)oll, Q)uit");
-            if rolls_count == 0 {
-                self.change_turn();
-            }
             if let Ok(event) = read() {
                 if let Event::Key(key_event) = event {
                     match key_event.code {
@@ -329,6 +391,7 @@ impl Game {
                             self.roll_result.push(dice);
                             let dice_str = format!("Result: {dice}");
                             print_temp_message(0, LINE_NUMBER_5, &dice_str, 1000);
+                            self.change_turn();
                         }
                         KeyCode::Char('q') => {
                             self.quit();
@@ -341,7 +404,6 @@ impl Game {
             if rolls_count == 2 && self.roll_result[0] == self.roll_result[1] {
                 self.roll_result.clear();
                 rolls_count = 0;
-                self.change_turn();
                 print_temp_message(0, LINE_NUMBER_3, "Tie", 1000);
             }
         }
@@ -369,10 +431,16 @@ impl Game {
                                 self.draw_board();
                                 self.print_turn();
                                 self.generate_moves();
+                                if self.moves.is_empty() {
+                                    print_temp_message(0, LINE_NUMBER_4, "No moves possible", 1000);
+                                    break;
+                                }
                                 self.print_moves();
                                 if let Some(source) = self.get_number("source") {
                                     if let Some(destination) = self.get_number("destination") {
-                                        if self.is_move_valid(source as usize, destination as usize)
+                                        if self
+                                            .moves
+                                            .contains(&(source as usize, destination as usize))
                                         {
                                             self.move_checker(
                                                 source as usize,
