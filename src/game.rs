@@ -10,6 +10,7 @@ use std::io::stdout;
 
 const WHITE: u8 = 0;
 const BLACK: u8 = 1;
+const BOARD_OFFSET: u16 = 1;
 const LINE_NUMBER_1: u16 = 17;
 const LINE_NUMBER_2: u16 = 18;
 const LINE_NUMBER_3: u16 = 19;
@@ -286,9 +287,9 @@ impl Game {
     fn draw_empty_field(i: usize) {
         for j in 0..3 {
             if i < 12 {
-                move_cursor(((11 - i) * 5) as u16, (15 - j) as u16);
+                move_cursor(((11 - i) * 5) as u16, (15 - (j + BOARD_OFFSET)) as u16);
             } else {
-                move_cursor(((i - 12) * 5) as u16, j as u16);
+                move_cursor(((i - 12) * 5) as u16, j + BOARD_OFFSET as u16);
             }
             print!("|");
         }
@@ -302,8 +303,10 @@ impl Game {
 
     fn draw_board(&self) {
         Game::clear_board();
+        print_message(0, 0,  "13   14   15   16   17   18   19   20   21   22   23   24");
+        print_message(0, 15, "12   11   10   9    8    7    6    5    4    3    2    1");
         for i in 0..self.board.len() {
-            let mut checker_count = self.board[i];
+            let mut checker_count = self.board[i] as u16;
             if checker_count == 0 {
                 Game::draw_empty_field(i);
                 continue;
@@ -313,9 +316,9 @@ impl Game {
             }
             for j in 0..checker_count {
                 if i < 12 {
-                    move_cursor(((11 - i) * 5) as u16, (15 - j) as u16); // TODO: add checker count threshold
+                    move_cursor(((11 - i) * 5) as u16, 15 - (j+BOARD_OFFSET)); // TODO: add checker count threshold
                 } else {
-                    move_cursor(((i - 12) * 5) as u16, j as u16);
+                    move_cursor(((i - 12) * 5) as u16, j+BOARD_OFFSET);
                 }
                 self.draw_checker(i);
             }
@@ -325,6 +328,8 @@ impl Game {
             "Bar: {} x ●, {} x ○",
             self.bar[WHITE as usize], self.bar[BLACK as usize]
         );
+        move_cursor(65, 1);
+        print!("25     0");
     }
 
     fn draw(&self) {
