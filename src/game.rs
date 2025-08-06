@@ -25,8 +25,9 @@ pub struct Game {
     roll_result: Vec<u8>,
     moves: Vec<(usize, usize)>,
     bar: [u8; 2],
-    home: [u8; 2],
-    is_running: bool,
+    tray: [u8; 2],
+    is_over: bool,    // is certain game finished
+    is_running: bool, // is whole program running
 }
 
 impl Game {
@@ -35,7 +36,6 @@ impl Game {
         execute!(stdout(), EnterAlternateScreen, Hide).unwrap();
 
         Self {
-            /*
             board: [
                 2 + 15,
                 0,
@@ -61,7 +61,8 @@ impl Game {
                 0,
                 0,
                 2,
-            ], // white takes 1-15, black takes 16-30 */
+            ], // white takes 1-15, black takes 16-30
+            /*
             board: [
                 0,
                 0,
@@ -88,11 +89,13 @@ impl Game {
                 0,
                 0,
             ], // white takes 1-15, black takes 16-30
+            */
             turn: WHITE, // rust doesn't tolerate uninitialized fields, needed
             roll_result: Vec::new(),
             moves: Vec::new(),
             bar: [0, 0],
-            home: [0, 0],
+            tray: [0, 0],
+            is_over: false,
             is_running: true,
         }
     }
@@ -122,7 +125,7 @@ impl Game {
             }
         }
 
-        if checker_count == 15 - self.home[self.turn as usize] {
+        if checker_count == 15 - self.tray[self.turn as usize] {
             return true;
         }
         false
@@ -301,28 +304,31 @@ impl Game {
         if self.bar[self.turn as usize] > 0 {
             let source: usize = if self.turn == WHITE { 25 } else { 0 };
             self.add_moves_from(source);
-            return;
-        }
-
-        // typical moves
-        for source in 1..=24 {
-            if let Some(color) = self.which_color(source) {
-                if color == self.turn {
-                    self.add_moves_from(source);
+        } else {
+            // typical moves
+            for source in 1..=24 {
+                if let Some(color) = self.which_color(source) {
+                    if color == self.turn {
+                        self.add_moves_from(source);
+                    }
                 }
+            }
+
+            // moves to tray
+            if self.are_all_home(self.turn) {
+                self.add_moves_to_tray();
             }
         }
 
-        // moves to tray
-        if self.are_all_home(self.turn) {
-            self.add_moves_to_tray();
-        }
+        // sort and remove duplicates (needed for forced bear off)
+        self.moves.sort();
+        self.moves.dedup();
     }
 
     fn move_checker(&mut self, source: usize, destination: usize) {
         // moves to tray / other moves
         if self.are_all_home(self.turn) && (destination == 0 || destination == 25) {
-            self.home[self.turn as usize] += 1;
+            self.tray[self.turn as usize] += 1;
             // removing the roll if taking of was forced (smaller move than the greatest roll)
             // TODO: test that
             if let Some((index, &max)) = self
@@ -488,8 +494,8 @@ impl Game {
         print!(" 25     0");
         move_cursor(60, 3);
         print!(
-            "Home: {} x ●, {} x ○",
-            self.home[WHITE as usize], self.home[BLACK as usize]
+            "Tray: {} x ●, {} x ○",
+            self.tray[WHITE as usize], self.tray[BLACK as usize]
         );
         move_cursor(65, 4);
         print!(" 0      25");
@@ -542,6 +548,58 @@ impl Game {
             }
         }
         None
+    }
+
+    fn reset(&mut self) {
+        self.board = [
+            0,
+            0,
+            0,
+            3,
+            5,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            7 + 15,
+            5 + 15,
+            3 + 15,
+            0,
+            0,
+            0,
+        ];
+        self.turn = WHITE;
+        self.roll_result.clear();
+        self.moves.clear();
+        self.bar = [0, 0];
+        self.tray = [0, 0];
+        self.is_over = false;
+        self.is_running = true;
+    }
+
+    fn check_is_over(&mut self) -> bool {
+        if self.tray[self.turn as usize] == 15 {
+            self.is_over = true;
+            let who_won = if self.turn == WHITE { "White" } else { "Black" };
+            let message = format!("{who_won} has won! Exiting to main menu...");
+            print_temp_message(0, LINE_NUMBER_4, &message, 3000);
+            self.reset();
+            return true;
+        }
+        false
+    }
+
+    fn quit(&mut self) {
+        self.is_running = false;
     }
 
     fn choose_who_starts(&mut self) {
@@ -624,6 +682,9 @@ impl Game {
                                         }
                                     }
                                 }
+                                if self.check_is_over() {
+                                    return;
+                                }
                             }
                             self.change_turn();
                         }
@@ -634,10 +695,6 @@ impl Game {
                 }
             }
         }
-    }
-
-    fn quit(&mut self) {
-        self.is_running = false;
     }
 
     pub fn run(&mut self) {
