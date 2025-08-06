@@ -1,9 +1,9 @@
 use crate::utils::*;
 use crossterm::{
-    cursor::{Hide, MoveTo, Show},
-    event::{Event, KeyCode, KeyEvent, poll, read},
+    cursor::{Hide, Show},
+    event::{Event, KeyCode, read},
     execute,
-    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use rand::Rng;
 use std::io::stdout;
@@ -392,14 +392,13 @@ impl Game {
         let dice_2 = Game::roll();
         self.roll_result.push(dice_2);
 
-        let mut dice_str = String::new();
-        if dice_1 != dice_2 {
-            dice_str = format!("Result: {dice_1}, {dice_2}");
+        let dice_str = if dice_1 != dice_2 {
+            format!("Result: {dice_1}, {dice_2}")
         } else {
             self.roll_result.push(dice_1);
             self.roll_result.push(dice_1);
-            dice_str = format!("Result: {dice_1}, {dice_1}, {dice_1}, {dice_1}");
-        }
+            format!("Result: {dice_1}, {dice_1}, {dice_1}, {dice_1}")
+        };
         print_message(0, LINE_NUMBER_5, &dice_str);
     }
 

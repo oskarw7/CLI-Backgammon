@@ -1,7 +1,6 @@
 use crossterm::{
     QueueableCommand,
     cursor::MoveTo,
-    queue,
     terminal::{Clear, ClearType},
 };
 use std::io::{stdout, Write};
