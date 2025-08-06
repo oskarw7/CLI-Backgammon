@@ -35,6 +35,7 @@ impl Game {
         execute!(stdout(), EnterAlternateScreen, Hide).unwrap();
 
         Self {
+            /*
             board: [
                 2 + 15,
                 0,
@@ -60,6 +61,32 @@ impl Game {
                 0,
                 0,
                 2,
+            ], // white takes 1-15, black takes 16-30 */
+            board: [
+                0,
+                0,
+                0,
+                3,
+                5,
+                7,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                7+15,
+                5+15,
+                3+15,
+                0,
+                0,
+                0,
             ], // white takes 1-15, black takes 16-30
             turn: WHITE, // rust doesn't tolerate uninitialized fields, needed
             roll_result: Vec::new(),
@@ -223,8 +250,8 @@ impl Game {
 
     fn add_moves_to_tray_dice(&mut self, destination: usize, mut dice: isize) {
         if let Some(field) = self.farthest_to_tray(self.turn) {
-            if dice > field as isize {
-                dice = field as isize;
+            if dice > (destination as i32 - field as i32).abs() as isize {
+                dice = (destination as i32 - field as i32).abs() as isize;
             }
         }
         if self.turn == BLACK {
@@ -298,14 +325,17 @@ impl Game {
             self.home[self.turn as usize] += 1;
             // removing the roll if taking of was forced (smaller move than the greatest roll)
             // TODO: test that
-            if let Some((index, &max)) = self.roll_result
+            if let Some((index, &max)) = self
+                .roll_result
                 .iter()
                 .enumerate()
-                .max_by_key(|&(_, &val)| val) {
-                    if max > (destination as i32 - source as i32) as u8 {
-                        self.roll_result.remove(index);
-                    }
+                .max_by_key(|&(_, &val)| val)
+            {
+                let diff = (destination as i32 - source as i32).abs() as u8;
+                if !self.roll_result.contains(&diff) && max > diff {
+                    self.roll_result.remove(index);
                 }
+            }
         } else {
             // checker gets captured
             if let Some(color) = self.which_color(destination) {
