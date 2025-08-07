@@ -1,4 +1,5 @@
 use crate::utils::*;
+use chrono::Local;
 use crossterm::{
     cursor::{Hide, Show},
     event::{Event, KeyCode, read},
@@ -6,7 +7,10 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use rand::Rng;
-use std::io::stdout;
+use std::{
+    fs::{self, File},
+    io::{BufRead, BufReader, Error, ErrorKind, Write, stdout},
+};
 
 const WHITE: u8 = 0;
 const BLACK: u8 = 1;
@@ -61,35 +65,7 @@ impl Game {
                 0,
                 0,
                 2,
-            ], // white takes 1-15, black takes 16-30
-            /*
-            board: [
-                0,
-                0,
-                0,
-                3,
-                5,
-                7,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                7+15,
-                5+15,
-                3+15,
-                0,
-                0,
-                0,
-            ], // white takes 1-15, black takes 16-30
-            */
+            ], // white takes 1-15, black takes 16-3
             turn: WHITE, // rust doesn't tolerate uninitialized fields, needed
             roll_result: Vec::new(),
             moves: Vec::new(),
@@ -98,6 +74,142 @@ impl Game {
             is_over: false,
             is_running: true,
         }
+    }
+
+    fn save_to_file(&self) -> std::io::Result<()> {
+        fs::create_dir_all("saves/games")?;
+        let filename = Local::now().format("saves/games/%H%M%S_%m%m%Y").to_string();
+        let mut file = File::create(&filename)?;
+
+        // board
+        for field in self.board {
+            write!(file, "{} ", field)?;
+        }
+        writeln!(file)?;
+
+        // next turn
+        writeln!(file, "{}", self.turn)?;
+
+        // bar
+        for field in self.bar {
+            write!(file, "{} ", field)?;
+        }
+        writeln!(file)?;
+
+        // tray
+        for field in self.tray {
+            write!(file, "{} ", field)?;
+        }
+
+        Ok(())
+    }
+
+    fn parse_line_to_vec(
+        reader: &mut BufReader<File>,
+        line: &mut String,
+    ) -> std::io::Result<Vec<u8>> {
+        line.clear();
+        reader.read_line(line)?;
+        Ok(line
+            .split_whitespace()
+            .filter_map(|x| x.parse().ok())
+            .collect())
+    }
+
+    fn get_filename(&mut self) -> std::io::Result<Option<String>> {
+        clear_screen();
+        print_message(0, 0, "Select save to read from:");
+        let mut filenames = Vec::new();
+        for entry in fs::read_dir("saves/games")? {
+            let entry = entry?;
+            let metadata = entry.metadata()?;
+            if metadata.is_file() {
+                filenames.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+        filenames.sort();
+        for i in 0..filenames.len() {
+            let message = format!("{}. {}", i + 1, filenames[i]);
+            print_message(0, (i + 1) as u16, &message);
+        }
+
+        let mut cursor = 0 as u16;
+        let lenght = filenames.len() as u16;
+        while self.is_running {
+            for j in 0..filenames.len() {
+                if j as u16 != cursor {
+                    print_at(20, (j + 1) as u16, " ");
+                } else {
+                    print_at(20, cursor+1, "<");
+                }
+            }
+            if let Ok(event) = read() {
+                if let Event::Key(key_event) = event {
+                    match key_event.code {
+                        KeyCode::Up => cursor = if cursor == 0 { lenght - 1 } else { cursor - 1 },
+                        KeyCode::Down => cursor = (cursor + 1) % lenght,
+                        KeyCode::Enter => return Ok(Some(filenames[cursor as usize].clone())),
+                        KeyCode::Esc => break,
+                        KeyCode::Char('q') => self.quit(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn read_from_file(&mut self) -> std::io::Result<()> {
+        if let Some(filename) = self.get_filename()? {
+            let path = format!("saves/games/{filename}");
+            let file = File::open(&path)?;
+            let mut reader = BufReader::new(file);
+            let mut line = String::new();
+
+            // Read board
+            let temp = Self::parse_line_to_vec(&mut reader, &mut line)?;
+            if temp.len() != 24 {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "Expected 24 elements for board in save file",
+                ));
+            }
+            for (i, field) in temp.iter().enumerate() {
+                self.board[i] = *field;
+            }
+
+            // Read turn
+            line.clear();
+            reader.read_line(&mut line)?;
+            self.turn = line.trim().parse().unwrap_or(WHITE);
+
+            // Read bar
+            let temp = Self::parse_line_to_vec(&mut reader, &mut line)?;
+            if temp.len() != 2 {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "Expected 2 elements for bar in save file",
+                ));
+            }
+            for (i, field) in temp.iter().enumerate() {
+                self.bar[i] = *field;
+            }
+
+            // Read tray
+            let temp = Self::parse_line_to_vec(&mut reader, &mut line)?;
+            if temp.len() != 2 {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "Expected 2 elements for tray in save file",
+                ));
+            }
+            for (i, field) in temp.iter().enumerate() {
+                self.tray[i] = *field;
+            }
+        } else {
+            return Err(Error::new(ErrorKind::Other, "")); // for a sake of simplicity in returned value
+        }
+        Ok(())
     }
 
     fn which_color(&self, field: usize) -> Option<u8> {
@@ -330,7 +442,6 @@ impl Game {
         if self.are_all_home(self.turn) && (destination == 0 || destination == 25) {
             self.tray[self.turn as usize] += 1;
             // removing the roll if taking of was forced (smaller move than the greatest roll)
-            // TODO: test that
             if let Some((index, &max)) = self
                 .roll_result
                 .iter()
@@ -551,30 +662,30 @@ impl Game {
 
     fn reset(&mut self) {
         self.board = [
+            2 + 15,
             0,
             0,
+            0,
+            0,
+            5,
             0,
             3,
-            5,
-            7,
             0,
             0,
             0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            7 + 15,
             5 + 15,
+            5,
+            0,
+            0,
+            0,
             3 + 15,
             0,
+            5 + 15,
             0,
             0,
+            0,
+            0,
+            2,
         ];
         self.turn = WHITE;
         self.roll_result.clear();
@@ -641,8 +752,10 @@ impl Game {
         }
     }
 
-    fn play(&mut self) {
-        self.choose_who_starts();
+    fn play(&mut self, loaded: bool) {
+        if !loaded {
+            self.choose_who_starts();
+        }
         while self.is_running {
             self.draw();
             print_message(0, LINE_NUMBER_1, "R)oll, S)ave, Q)uit, ESC - back to menu");
@@ -687,6 +800,23 @@ impl Game {
                             }
                             self.change_turn();
                         }
+                        KeyCode::Char('s') => {
+                            if let Ok(()) = self.save_to_file() {
+                                print_temp_message(
+                                    0,
+                                    LINE_NUMBER_4,
+                                    "Saved game state successfully",
+                                    1000,
+                                );
+                            } else {
+                                print_temp_message(
+                                    0,
+                                    LINE_NUMBER_4,
+                                    "Saved game state successfully",
+                                    1000,
+                                );
+                            }
+                        }
                         KeyCode::Esc => return,
                         KeyCode::Char('q') => self.quit(),
                         _ => {}
@@ -699,11 +829,16 @@ impl Game {
     pub fn run(&mut self) {
         while self.is_running {
             self.draw();
-            print_message(0, LINE_NUMBER_1, "P)lay, Q)uit");
+            print_message(0, LINE_NUMBER_1, "P)lay, L)oad, Q)uit");
             if let Ok(event) = read() {
                 if let Event::Key(key_event) = event {
                     match key_event.code {
-                        KeyCode::Char('p') => self.play(),
+                        KeyCode::Char('p') => self.play(false),
+                        KeyCode::Char('l') => {
+                            if self.read_from_file().is_ok(){
+                                self.play(true);
+                            }
+                        }
                         KeyCode::Char('q') => self.quit(),
                         _ => {}
                     }
