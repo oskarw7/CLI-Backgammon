@@ -6,10 +6,12 @@ use crossterm::{
     execute,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use rand::Rng;
+use rand::{Rng, rand_core::le};
 use std::{
-    fs::{self, File},
-    io::{BufRead, BufReader, Error, ErrorKind, Write, stdout},
+    fs::{self, File, OpenOptions, read_to_string},
+    io::{BufRead, BufReader, Error, ErrorKind, Write, stdin, stdout},
+    num::ParseIntError,
+    u32,
 };
 
 const WHITE: u8 = 0;
@@ -76,6 +78,103 @@ impl Game {
         }
     }
 
+    fn get_leaderboard(&mut self) -> std::io::Result<()> {
+        let mut leaderboard = Vec::new();
+
+        if let Ok(content) = read_to_string("saves/leaderboard.txt") {
+            for line in content.lines() {
+                let mut parts = line.split_whitespace();
+                if let (Some(nick), Some(score)) = (parts.next(), parts.next()) {
+                    if let Ok(score) = score.parse::<u32>() {
+                        leaderboard.push((nick.to_string(), score));
+                    }
+                }
+            }
+        }
+
+        if leaderboard.is_empty() {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "No entried found in leaderboard",
+            ));
+        }
+
+        leaderboard.sort_by(|a, b| b.1.cmp(&a.1));
+
+        clear_screen();
+        let mut i = 0;
+        print_message(0, i, "LEADERBOARD:");
+        for (nick, score) in leaderboard {
+            i += 1;
+            let message = format!("{}. {} {}", i, nick, score);
+            print_message(0, i, &message);
+        }
+        print_message(0, i+2, "Press anything to go back, q to quit");
+
+        if let Ok(event) = read() {
+            if let Event::Key(key_event) = event {
+                match key_event.code {
+                    KeyCode::Char('q') => self.quit(),
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn get_nick() -> std::io::Result<String> {
+        terminal::disable_raw_mode()?;
+
+        move_cursor(0, LINE_NUMBER_4);
+        let mut nick = String::new();
+        stdin().read_line(&mut nick)?;
+        nick = nick.trim_end().to_string();
+
+        terminal::enable_raw_mode()?;
+        Ok(nick)
+    }
+
+    fn update_leaderboard() -> std::io::Result<()> {
+        let nick = Game::get_nick()?;
+        let mut leaderboard = Vec::new();
+        let mut is_found = false;
+
+        fs::create_dir_all("saves/")?;
+
+        if let Ok(content) = read_to_string("saves/leaderboard.txt") {
+            for line in content.lines() {
+                let mut parts = line.split_whitespace();
+                if let (Some(file_nick), Some(score)) = (parts.next(), parts.next()) {
+                    if nick == file_nick {
+                        if let Ok(score) = score.parse::<u32>() {
+                            leaderboard.push(format!("{} {}", nick, score + 1));
+                            is_found = true;
+                        }
+                    } else {
+                        leaderboard.push(format!("{} {}", file_nick, score));
+                    }
+                }
+            }
+        }
+
+        if !is_found {
+            leaderboard.push(format!("{} {}", nick, 1));
+        }
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("saves/leaderboard.txt")?;
+
+        for entry in leaderboard {
+            writeln!(file, "{}", entry)?;
+        }
+
+        Ok(())
+    }
+
     fn save_to_file(&self) -> std::io::Result<()> {
         fs::create_dir_all("saves/games")?;
         let filename = Local::now().format("saves/games/%H%M%S_%m%m%Y").to_string();
@@ -140,7 +239,7 @@ impl Game {
                 if j as u16 != cursor {
                     print_at(20, (j + 1) as u16, " ");
                 } else {
-                    print_at(20, cursor+1, "<");
+                    print_at(20, cursor + 1, "<");
                 }
             }
             if let Ok(event) = read() {
@@ -207,7 +306,7 @@ impl Game {
                 self.tray[i] = *field;
             }
         } else {
-            return Err(Error::new(ErrorKind::Other, "")); // for a sake of simplicity in returned value
+            return Err(Error::new(ErrorKind::Other, "")); // to simplify returned value
         }
         Ok(())
     }
@@ -700,8 +799,9 @@ impl Game {
         if self.tray[self.turn as usize] == 15 {
             self.is_over = true;
             let who_won = if self.turn == WHITE { "White" } else { "Black" };
-            let message = format!("{who_won} has won! Exiting to main menu...");
-            print_temp_message(0, LINE_NUMBER_4, &message, 3000);
+            let message = format!("{who_won} has won! Enter winner's nick:");
+            print_message(0, LINE_NUMBER_3, &message);
+            let _ = Game::update_leaderboard();
             self.reset();
             return true;
         }
@@ -758,7 +858,11 @@ impl Game {
         }
         while self.is_running {
             self.draw();
-            print_message(0, LINE_NUMBER_1, "R)oll, S)ave, Q)uit, ESC - back to menu");
+            print_message(
+                0,
+                LINE_NUMBER_1,
+                "R)oll, S)ave, Q)uit, M)enu (without save)",
+            );
             self.print_turn();
             if let Ok(event) = read() {
                 if let Event::Key(key_event) = event {
@@ -817,7 +921,10 @@ impl Game {
                                 );
                             }
                         }
-                        KeyCode::Esc => return,
+                        KeyCode::Char('m') => {
+                            self.reset();
+                            return;
+                        }
                         KeyCode::Char('q') => self.quit(),
                         _ => {}
                     }
@@ -829,15 +936,18 @@ impl Game {
     pub fn run(&mut self) {
         while self.is_running {
             self.draw();
-            print_message(0, LINE_NUMBER_1, "P)lay, L)oad, Q)uit");
+            print_message(0, LINE_NUMBER_1, "P)lay, L)oad, S)how leaderboard, Q)uit");
             if let Ok(event) = read() {
                 if let Event::Key(key_event) = event {
                     match key_event.code {
                         KeyCode::Char('p') => self.play(false),
                         KeyCode::Char('l') => {
-                            if self.read_from_file().is_ok(){
+                            if self.read_from_file().is_ok() {
                                 self.play(true);
                             }
+                        }
+                        KeyCode::Char('s') => {
+                            let _ = self.get_leaderboard();
                         }
                         KeyCode::Char('q') => self.quit(),
                         _ => {}
