@@ -16,6 +16,7 @@ use std::{
 const WHITE: u8 = 0;
 const BLACK: u8 = 1;
 const BOARD_OFFSET: u16 = 1;
+const MAX_CHECKERS_DRAWN: u16 = 5;
 const LINE_NUMBER_1: u16 = 17;
 const LINE_NUMBER_2: u16 = 18;
 const LINE_NUMBER_3: u16 = 19;
@@ -848,16 +849,31 @@ impl Game {
                 Self::draw_empty_field(i);
                 continue;
             }
+
             if checker_count > 15 {
                 checker_count -= 15;
             }
-            for j in 0..checker_count {
+
+            let draw_count = checker_count.min(MAX_CHECKERS_DRAWN);
+            for j in 0..draw_count {
                 if i < 12 {
-                    move_cursor(((11 - i) * 5) as u16, 15 - (j + BOARD_OFFSET)); // TODO: add checker count threshold
+                    move_cursor(((11 - i) * 5) as u16, 15 - (j + BOARD_OFFSET));
                 } else {
                     move_cursor(((i - 12) * 5) as u16, j + BOARD_OFFSET);
                 }
                 self.draw_checker(i);
+            }
+
+            if checker_count > MAX_CHECKERS_DRAWN {
+                if i < 12 {
+                    move_cursor(
+                        ((11 - i) * 5) as u16,
+                        15 - (MAX_CHECKERS_DRAWN + BOARD_OFFSET),
+                    );
+                } else {
+                    move_cursor(((i - 12) * 5) as u16, MAX_CHECKERS_DRAWN + BOARD_OFFSET);
+                }
+                print!("+{}", checker_count - MAX_CHECKERS_DRAWN);
             }
         }
         move_cursor(60, 0);
