@@ -213,9 +213,9 @@ impl Game {
     }
 
     fn save_previous_moves(&self) -> std::io::Result<()> {
-        fs::create_dir_all("saves/gameplays")?;
+        fs::create_dir_all("saves/replays")?;
         let filename = Local::now()
-            .format("saves/gameplays/%H%M%S_%m%m%Y")
+            .format("saves/replays/%H%M%S_%m%m%Y")
             .to_string();
         let mut file = File::create(&filename)?;
 
@@ -355,9 +355,9 @@ impl Game {
         Ok(())
     }
 
-    fn load_gameplay(&mut self) -> std::io::Result<()> {
-        if let Some(filename) = self.get_filename("saves/gameplays")? {
-            let path = format!("saves/gameplays/{filename}");
+    fn load_replay(&mut self) -> std::io::Result<()> {
+        if let Some(filename) = self.get_filename("saves/replays")? {
+            let path = format!("saves/replays/{filename}");
             let file = File::open(&path)?;
             let mut reader = BufReader::new(file);
             let mut line = String::new();
@@ -418,20 +418,27 @@ impl Game {
         }
 
         self.draw_board();
-        print_message(0, LINE_NUMBER_1, "←/→ - one move back/forward, s/e - first/last move");
+        print_message(
+            0,
+            LINE_NUMBER_1,
+            "←/→ - one move back/forward, s/e - first/last move",
+        );
         if index == 0 {
             print_message(0, LINE_NUMBER_2, "Beggining");
+            clear_line(LINE_NUMBER_3);
         } else {
             if self.turn == WHITE {
                 print_message(0, LINE_NUMBER_2, "White's turn");
             } else {
                 print_message(0, LINE_NUMBER_2, "Black's turn");
             }
+            let message = format!("Move number: {}", index);
+            print_message(0, LINE_NUMBER_3, &message);
         }
     }
 
-    fn visualize_gameplay(&mut self) {
-        if self.load_gameplay().is_ok() {
+    fn visualize_replay(&mut self) {
+        if self.load_replay().is_ok() {
             let mut cursor = 0;
             let last_index = self.previous_moves.len() - 1;
             self.show_move(cursor);
@@ -467,6 +474,7 @@ impl Game {
                 }
             }
         }
+        self.reset();
     }
 
     fn which_color(&self, field: usize) -> Option<u8> {
@@ -954,13 +962,35 @@ impl Game {
         self.is_running = true;
     }
 
-    fn check_is_over(&mut self) -> bool {
+    fn check_is_over(&mut self, loaded: bool) -> bool {
         if self.tray[self.turn as usize] == 15 {
             self.is_over = true;
             let who_won = if self.turn == WHITE { "White" } else { "Black" };
             let message = format!("{who_won} has won! Enter winner's nick:");
             print_message(0, LINE_NUMBER_3, &message);
             let _ = Self::update_leaderboard();
+            if !loaded {
+                print_message(
+                    0,
+                    LINE_NUMBER_3,
+                    "Do you want to save gameplay to replays folder? y/n",
+                );
+                clear_line(LINE_NUMBER_4);
+                loop {
+                    if let Ok(event) = read() {
+                        if let Event::Key(key_event) = event {
+                            match key_event.code {
+                                KeyCode::Char('y') => {
+                                    let _ = self.save_previous_moves();
+                                    break;
+                                }
+                                KeyCode::Char('n') => break,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
             self.reset();
             return true;
         }
@@ -1061,7 +1091,7 @@ impl Game {
                                         }
                                     }
                                 }
-                                if self.check_is_over() {
+                                if self.check_is_over(loaded) {
                                     return;
                                 }
                             }
@@ -1088,9 +1118,6 @@ impl Game {
                             self.reset();
                             return;
                         }
-                        KeyCode::Char('x') => {
-                            let _ = self.save_previous_moves();
-                        }
                         KeyCode::Char('q') => self.quit(),
                         _ => {}
                     }
@@ -1105,7 +1132,7 @@ impl Game {
             print_message(
                 0,
                 LINE_NUMBER_1,
-                "P)lay, L)oad, S)how leaderboard, V)isualize gameplay, Q)uit",
+                "P)lay, L)oad, S)how leaderboard, R)eplay, Q)uit",
             );
             if let Ok(event) = read() {
                 if let Event::Key(key_event) = event {
@@ -1119,8 +1146,8 @@ impl Game {
                         KeyCode::Char('s') => {
                             let _ = self.get_leaderboard();
                         }
-                        KeyCode::Char('v') => {
-                            let _ = self.visualize_gameplay();
+                        KeyCode::Char('r') => {
+                            let _ = self.visualize_replay();
                         }
                         KeyCode::Char('q') => self.quit(),
                         _ => {}
